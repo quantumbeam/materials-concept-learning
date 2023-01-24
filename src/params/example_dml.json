@@ -1,0 +1,21 @@
+{
+    "experiment_name": "cgcnn_trainall",
+    "save_path": "result/dml",
+    "lr": 0.001,
+    "batch_size": 512,
+    "n_epochs": 100,
+    "encoder_name": "cgcnn",
+    "embedding_dim": 1024,
+    "embedding_normalize": "no",
+    "scale_crystal": 0,
+    "scale_xrd": 0,
+    "loss_mode": "bi_directional",
+    "margin": 1,
+    "sampling_policy": "noneasy",
+    "sampling_target": "D",
+    "train_mode": "train_on_all",
+    "train_percent_check": 1.0,
+    "val_percent_check": 1.0,
+    "model_checkpoint_save_top_k": 5,
+    "pretrained_model": null
+}
