@@ -20,81 +20,131 @@ class GaussianDistance(object):
 
     Unit: angstrom
     """
+
     def __init__(self, dmin, dmax, step, var=None):
         """
-        Parameters
-        ----------
+        Initialize GaussianDistance class instance
 
-        dmin: float
-          Minimum interatomic distance
-        dmax: float
-          Maximum interatomic distance
-        step: float
-          Step size for the Gaussian filter
+        Parameters:
+            dmin: float
+                Minimum interatomic distance
+            dmax: float
+                Maximum interatomic distance
+            step: float
+                Step size for the Gaussian filter
+            var: optional float
+                A variance value for the Gaussian filter (default=step)
+        
+        Returns: None
+
         """
+
+        # Ensure that min is less than max and max-min is greater than step.
         assert dmin < dmax
-        assert dmax - dmin > step
-        self.filter = np.arange(dmin, dmax+step, step)
+        assert dmax - dmin >= step 
+
+        # Create a filter kernel.
+        self.filter = np.arange(dmin, dmax+step, step) 
+
+        # If no variance value was provided, set it to the step size.
         if var is None:
-            var = step
+          var = step
+        
+        # Store the variance and kernel as instance variables.
         self.var = var
 
     def expand(self, distances):
         """
         Apply Gaussian disntance filter to a numpy distance array
 
-        Parameters
-        ----------
+        Parameters:
+            distances: np.array
+                A distance matrix of any shape
 
-        distance: np.array shape n-d array
-          A distance matrix of any shape
+        Returns:
+            expanded_distance: np.array 
+                Expanded distance matrix with the last dimension of length len(self.filter)
 
-        Returns
-        -------
-        expanded_distance: shape (n+1)-d array
-          Expanded distance matrix with the last dimension of length
-          len(self.filter)
         """
+
+        # Expand the dimensions of the distances array and interpolate it with the stored kernel
         return np.exp(-(distances[..., np.newaxis] - self.filter)**2 /
-                      self.var**2)
+                      self.var**2) 
+
 
 class ExportCrystalGraph:
     def __init__(self, atom_feat_mode='original', max_num_nbr=12, radius=8, dmin=0, step=0.2):
+        """
+        Initializes the object that generates a Crystal Graph from a crystal structure (pymatgen structure object).
+        
+        Parameters
+        ----------
+        atom_feat_mode: str
+            Determines what is used as atom_fea (initial vector of each atom's features).
+             - "original" uses atom_init.json (default for CGCNN)
+             - "xyz_pos_and_elem_num" uses a one-hot vector of the atomic number along with the x, y, z Cartesian coordinates (normalized) (similar to PointNet)
+        
+        max_num_nbr: int
+            Max number of neighbors allowed
+        radius: float
+            Maximum distance for finding neighbouring atoms
+        dmin: float
+            Minimum distance (used for GaussianDisatance)
+        step: float
+            Step size (used for GaussianDistance)
+
+        """
         self.atom_feat_mode = atom_feat_mode
         self.ATOM_NUM_UPPER = 98
         self.max_num_nbr, self.radius = max_num_nbr, radius
         self.gdf = GaussianDistance(dmin=dmin, dmax=self.radius, step=step)
         self.atom_features = np.array(atom_features, dtype=float)
-
-        """
-        結晶構造（pymatgenのstructureオブジェクト）からCrystal Graphを生成する。
-        
-        Parameters
-        ----------
-        atom_init_path: str
-            atom_init.json までのパス
-        atom_feat_mode: str
-            atom_fea（各原子の特徴ベクトルの初期値）として何を用いるか選ぶ。
-            "original"の場合は、atom_init.jsonを用いる（CGCNNのデフォルト）
-            "xyz_pos_and_elem_num"の場合は、各原子のデカルト座標（長辺の長さを1に規格化）と原子番号のonehot vectorを使う（PointNetに少し近づける）
-
-        """
+       
 
     def extract_atom_feature(self, pymg_structure_obj):
-        # spe = np.array([site.specie.number for site in pymg_structure_obj])
-        # spe = np.eye(self.ATOM_NUM_UPPER)[spe]
-        spe = generate_site_species_vector(pymg_structure_obj, self.ATOM_NUM_UPPER)
+        """
+        Extracts features (cartesian coordinates and one-hot vector of atomic numbers) for each atom in the given PyMg crystal structure.
 
-        xyz = np.vstack([ [site.x, site.y, site.z] for site in pymg_structure_obj])
+        Parameters
+        ----------
+        pymg_structure_obj: pymatgen.Structure
+            The PyMatGen Structure object representing the crystal.
+            
+
+        Returns
+        -------
+        numpy.ndarray:
+            Numpy array with feature vectors for each atom.
+        """
+       
+        spe = generate_site_species_vector(pymg_structure_obj, self.ATOM_NUM_UPPER)
+        xyz = np.vstack([[site.x, site.y, site.z] for site in pymg_structure_obj])
         pmin, pmax = xyz.min(axis=0, keepdims=True), xyz.max(axis=0, keepdims=True)
         xyz = xyz - (pmin + pmax) / 2
-        scale = (pmax-pmin).max() / 2
+        scale = (pmax - pmin).max() / 2
         xyz = xyz / scale
         return np.concatenate([xyz, spe], axis=1)
 
     def get_crystal_graph_feature(self, pymg_structure_obj, material_id):
+        """
+        Generates the Crystal Graph feature for a crystal structure plotly.py
 
-        # crystal graphの特徴量生成
+        Parameters
+        ----------
+        pymg_structure_obj: pymatgen.Structure
+            The PyMatGen Structure object representing the crystal.
+        material_id: str
+            Integer padding of six zeros for Material Project IDs or internal MPIDs
+            
+        Returns
+        -------
+        tuple:
+            
+            1. torch.tensor (size = [num_atoms, num_features]) representing the features (φa) of each atom
+            2. torch.tensor representing the one-hot encoded neighboring atoms (φbr)
+            3. torch.Longtensor representing the indices of the neighboring atoms relative to the atom with φa
+        """
+        # generate crystal graph features
         if self.atom_feat_mode == 'original':
             if hasattr(pymg_structure_obj, 'species'):
                 atom_num = np.array([x.specie.number-1 for x in pymg_structure_obj])
@@ -138,50 +188,57 @@ class ExportCrystalGraph:
 
 
 def make_data(material, exporter, primitive):
+    # Get the structure of the material, check first for final_structure, then for structure
     if "final_structure" in material:
         structure = material['final_structure']
     elif "structure" in material:
         structure = material['structure']
     else:
         raise AttributeError("Material has no structure!")
-
+    
+    # If not primitive, convert the structure to conventional standard
     if not primitive:
         structure = SpacegroupAnalyzer(structure).get_conventional_standard_structure()
-
+    
+    # Get crystal graph features of the structure
     if "material_id" in material:
         id = material['material_id']
     else:
-        id = material['file_id']
-        
+        id = material['file_id']        
     atom_fea, nbr_fea, nbr_fea_idx = exporter.get_crystal_graph_feature(structure, id)
 
-    # atom_fea: (N, atom_fea_len)
-    # nbr_fea: (N, M, nbr_fea_len)
-    # nbr_fea_idx: (N, M)
+    # Reshape edge information to create a one-dimensional tensor of edge attributes
     N, M, dim = nbr_fea.shape
     edge_attr = nbr_fea.reshape(N*M, dim)
-
+    
+    # Reshape neighbor indexing information to be two-dimensional
     cols = nbr_fea_idx.reshape(N*M)
     rows = torch.arange(N, dtype=torch.long)
     rows = rows[:, None].expand((N, M)).reshape(N*M)
     edge_index = torch.stack((rows, cols), dim=0)
 
+    # Return data object containing atom and edge feature tensors
     data = Data(x=atom_fea, edge_attr=edge_attr, edge_index=edge_index)
     data.material_id = id
     
     return data
 
+
 class MultimodalDatasetMP_CGCNN(MultimodalDatasetMP):
     def __init__(self, target_data, params, \
         atom_feat_mode='original', max_num_nbr=12, radius=8, dmin=0, step=0.2):
+        # Set parameters for crystal graph feature extraction
         self.use_primitive = params.use_primitive if hasattr(params, 'use_primitive') else True
         self.atom_fea_original = atom_feat_mode == 'original'
         self.cg_exporter = ExportCrystalGraph(atom_feat_mode, max_num_nbr, radius, dmin, step)
-
+        # Initialize the class by calling the constructor of the parent class
         super().__init__(target_data)
 
     @property
     def processed_file_names(self):
+        """
+        Set the names of the processed files
+        """
         suf = "" if self.atom_fea_original else "_pn"
         if self.use_primitive:
             return f'processed_data_cgcnn{suf}.pt'
@@ -189,15 +246,26 @@ class MultimodalDatasetMP_CGCNN(MultimodalDatasetMP):
             return f'processed_data_convcell_cgcnn{suf}.pt'
 
     def process_input(self, material):
+        """
+        Process each input to generate the data samples
+        """
         return make_data(material, self.cg_exporter, self.use_primitive)
 
     # In torch_geometric.data.dataset.Dataset, these functions are checked
-    # if exist in self.__class__.__dict__.keys(). But __dict__ does not capture
-    # the inherited functions. So, here explicitly claim the process and download functions
+    # if exist in self.__class__.__dict__.keys(). But __dict__ does not capture the inherited functions.
+    # So, here explicitly claim the process and download functions
     def process(self):
+        """
+        Process the whole dataset, i.e., apply `process_input()` to each instance of the dataset
+        """
         super().process()
+    
     def download(self):
+        """
+        Download the dataset
+        """
         super().download()
+
 
 
 class RegressionDatasetMP_CGCNN(RegressionDatasetMP):
