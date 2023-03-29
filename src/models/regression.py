@@ -13,6 +13,14 @@ from models.cgcnn import CGCNN
 from models.periodic_pointnet import PeriodicPointNet
 
 class RegressionModel(LightningModule):
+    """
+    A PyTorch Lightning module for regression tasks.
+
+    Args:
+        params: (argparse.Namespace) The configuration parameters.
+        train_loader: (torch.utils.data.DataLoader) The data loader for training set.
+        val_loader: (torch.utils.data.DataLoader)  The data loader for validation set. 
+    """
     def __init__(self, params, train_loader, val_loader):
         super(RegressionModel, self).__init__()
 
@@ -31,7 +39,7 @@ class RegressionModel(LightningModule):
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.params = params
-        self.hparams = params.__dict__  # hparamsという引数を渡しておくと自動でログってくれるらしい
+        self.hparams = params.__dict__
 
         self.targets = self.params.targets
         if isinstance(self.targets, str):

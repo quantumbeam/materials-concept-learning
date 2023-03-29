@@ -12,8 +12,22 @@ from models.utils import MLP, normalize_scale, normalize_embedding
 
 class SAModule(torch.nn.Module):
     """
-    Set Abstraction module
+    Set Abstraction module. This module downsamples a point cloud into a smaller number
+    of points by gathering neighbors, using fps(), within each non-overlapping region in
+    each batch of points, computing relative positions with a radius cutoff, and then
+    performing Point Convolution.
+
+    Args:
+        ratio (float): sampling ratio for fps. Default is 0.5.
+        r (float): radius cutoff for computing nearest neighbors. Default is 0.1.
+        nn (torch.nn.Module): PyTorch module that performs Point Convolution on input.
+
+    Returns:
+        tuple: A tuple containing the output tensor (the downsampled point cloud), positional embedding,
+            and the corresponding batch indices.
+
     """
+
     def __init__(self, ratio, r, nn):
         super(SAModule, self).__init__()
         self.ratio = ratio
@@ -46,7 +60,34 @@ class GlobalSAModule(torch.nn.Module):
 
 class CrystalEncoder(torch.nn.Module):
     """
-    ネットワーク本体
+    Implements a PointNet-based encoder for crystal structures.
+
+    Args:
+        params: a parameter object containing the following attributes:
+            - SA1_sample_ratio (float): sampling ratio for the first set abstraction layer.
+            - SA1_sample_r (float): radius to determine which points will be grouped together
+                in the first set abstraction layer.
+            - SA2_sample_ratio (float): sampling ratio for the second set abstraction layer.
+            - SA2_sample_r (float): radius to determine which points will be grouped together
+                in the second set abstraction layer.
+            - embedding_dim (int): size of the output embedding.
+            - use_cgcnn_feat (bool): if True, uses 98 CGCNN atom features in place of the 
+                scalar element types as input.
+            - scale_crystal (float): if >0, rescales the crystal positions by dividing them 
+                by this value.
+            - targets (Union[None, str, List[str]]): can be None or a string, or a list of strings,
+                in which case the model will perform regression over those properties.
+
+        output_intermediate_feat (bool): if True, the forward method returns intermediate 
+            features in addition to the final embedding.
+
+    Attributes:
+        ATOM_FEAT_DIM (int): number of features used for each atom. If use_cgcnn_feat is True,
+            this will be fixed to 98.
+
+    Methods:
+        forward(data): computes the forward pass of the encoder.
+
     """
     def __init__(self, params, output_intermediate_feat=False):
         super(CrystalEncoder, self).__init__()

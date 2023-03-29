@@ -53,6 +53,15 @@ def batch_wise_accuracy(x, y):
 
 
 class MetricLearningModel(LightningModule):
+    """A class representing a metric learning model using LightningModule.
+
+    Attributes:
+    model (CrystalEncoder): The crystal encoder model specified by the encoder_name.
+    model_xrd (XRD_CNN): The CNN model used for XRD data.
+    train_loader: A dataloader containing the training data.
+    val_loader: A dataloader containing the validation data.
+    params: Model parameters such as learning rate, encoder name etc.
+    """
     def __init__(self, params, train_loader, val_loader):
         super(MetricLearningModel, self).__init__()
 

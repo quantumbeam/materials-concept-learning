@@ -247,11 +247,20 @@ def get_cart_coords(data):
     return coords
 
 class PeriodicPointNet(torch.nn.Module):
+    """PeriodicPointNet module for crystal 3D structures.
+
+    Args:
+        params (object): Hyperparameters configuration object.
+
+    Attributes:
+        ATOM_FEAT_DIM (int): Dimension size of atom features.
+        POS_ENC_LEVEL (int): Level of positional encoding.
+        POS_CHANNELS (int): Number of position channels.
+        sa1_module,sa2_module,sa3_module (objects): Corresponding PointNet-like modules for a periodic crystal lattice.
+        crystal_lin1,crystal_bn1,crystal_lin2,crystal_bn2,crystal_lin3 (objects): Fully connected layers for outputting the final embedding vector or regression results.
+        crystal_regression (str): Final fully connected layer used for regression if 'params.targets' is available.
     """
-    xrd_encoder: str
-        XRDのデータポイント数に合わせてXRDのエンコーダ（1D CNN）の設定を切り替える。
-        xrd_features_BN_9kは9000点、〜_5kは5000点
-    """
+    
     def __init__(self, params):
         super().__init__()
         SA1_sample_ratio = params.SA1_sample_ratio
@@ -289,7 +298,7 @@ class PeriodicPointNet(torch.nn.Module):
         else:
             raise Exception(f"Not defined: params.encoder_name ({params.encoder_name})")
 
-        self.crystal_lin1 = nn.Linear(1024, embedding_dim) # ここまではpre-trainedなweightが使えるかも
+        self.crystal_lin1 = nn.Linear(1024, embedding_dim)
         self.cry_bn1 = nn.BatchNorm1d(num_features=embedding_dim)
         self.crystal_lin2 = nn.Linear(embedding_dim, embedding_dim)
         self.cry_bn2 = nn.BatchNorm1d(num_features=embedding_dim)

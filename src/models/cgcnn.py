@@ -80,10 +80,15 @@ class ConvLayer(nn.Module):
 
 class CGCNN(torch.nn.Module):
     """
-    xrd_encoder: str
-        XRDのデータポイント数に合わせてXRDのエンコーダ（1D CNN）の設定を切り替える。
-        xrd_features_BN_9kは9000点、〜_5kは5000点
+    Model to encode crystal structures with crystal graph convolutional networks(CGCNN).
+
+    Args:
+    - params: argparse.Namespace
+        Namespace containing hyperparameters.
+    - output_intermediate_feat: bool(False)
+        Whether to return intermediate features or not.
     """
+    
     def __init__(self, params, output_intermediate_feat=False,
                  orig_atom_fea_len=92, nbr_fea_len=41,
                  atom_fea_len=64, n_conv=3):
@@ -92,11 +97,11 @@ class CGCNN(torch.nn.Module):
         self.params = params
         self.output_intermediate_feat = output_intermediate_feat
 
-        # CGCNN部分
-        self.cg_in_lin1 = nn.Linear(orig_atom_fea_len, atom_fea_len) # atom_fea_lenはデフォルト64だが、1024ぐらいまで大きくしたほうがいいか
+        # CGCNN section
+        self.cg_in_lin1 = nn.Linear(orig_atom_fea_len, atom_fea_len)
         self.cg_convs = nn.ModuleList([ConvLayer(atom_fea_len=atom_fea_len,
                                     nbr_fea_len=nbr_fea_len)
-                                    for _ in range(n_conv)]) #n_convの数だけConvLayerを繰り返し定義
+                                    for _ in range(n_conv)])
         self.cg_in_lin2 = nn.Linear(atom_fea_len, embedding_dim)
         self.cg_in_bn1 = nn.BatchNorm1d(num_features=embedding_dim)
         
@@ -106,17 +111,27 @@ class CGCNN(torch.nn.Module):
         self.cry_bn2 = nn.BatchNorm1d(num_features=embedding_dim)
 
         if not hasattr(params, 'targets') or params.targets is None:
-            # embedding mode when targets = None
+            # Embedding mode when `params.targets=None`.
             self.crystal_lin3 = nn.Linear(embedding_dim, embedding_dim)
         else:
-            # regression mode when targets = "hoge" or ["hoge", "foo"]
+            # Regression mode when targets = "hoge" or ["hoge", "foo"]
             final_dim = 1 if isinstance(params.targets, str) \
                 else len(params.targets)
             self.crystal_regression = nn.Linear(embedding_dim, final_dim)
 
 
     def forward(self, data):
-        #atom_fea, nbr_fea, nbr_fea_idx, crystal_atom_idx = cg_features
+        """
+        Performs forward pass.
+
+        Args:
+        - data: torch_geometric.Data
+            Data object containing crystal graph information.
+
+        Returns:
+        - out: torch.Tensor
+            Encoded tensor with shape 'embedding_dim' after pooling of crystal.
+        """
 
         # Convert torch_geometric.Data to CGCNN format
         N, E = data.x.shape[0], data.edge_attr.shape[0]
