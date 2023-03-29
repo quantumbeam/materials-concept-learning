@@ -4,28 +4,69 @@ import torch.nn.functional as F
 import numpy as np
 
 def large_cdist(x, y, p=2, k=8, compute_mode='donot_use_mm_for_euclid_dist'):
+    """
+    Computes pairwise distance between every column between x and y,
+    with an option of computing it on different devices.
+
+    Args:
+    - x: tensor of shape (n_batch_x, n_dim)
+    - y: tensor of shape (n_batch_y, n_dim)
+    - p: int, the desired degree of norm for the Minkowski metric used to compute distances.
+    - k: int, Number of chunks to split `x` prior to sending them to cdist().
+    - compute_mode: str, specifies how cross products are computed. 
+
+    Returns:
+    - dist: tensor of pairwise distances of shape (n_batch_x, n_batch_y)
+
+    """
+
+    # determine the dimensions of X and Y
     n_batch_x = x.shape[0]
     n_batch_y = n_batch_x
     n_dim = x.shape[1]
     
+    # ensure the number of rows is divisible by k
     f = -n_batch_x % k
     if f > 0:
         z = torch.zeros((f, n_dim), dtype=x.dtype, device=x.device)
         x = torch.cat((x, z), dim=0)
         n_batch_x += f
 
+    # restructure X and Y into k pieces
     x_ = x.reshape(k, n_batch_x//k, n_dim)
     y_ = y.reshape(1, n_batch_y, n_dim)
+
+    # compute pairwise distance between X and Y
     dist = [torch.cdist(x_[i:i+1], y_, p=p, compute_mode=compute_mode) for i in range(k)]
     dist = torch.cat(dist,dim=0)
     dist = dist.reshape(n_batch_x, n_batch_y)
+
+    # remove added last rows if it applies.
     if f > 0:
         dist = dist[:-f, :]
+
     return dist
 
+
 def _distance_weighted_sampling(distance, dim, cutoff=0.5, nonzero_loss_cutoff=1.4, normalize =False, **kwargs):
+    """
+    Randomly samples pairs of indices according to a weighting scheme.
+
+    Args:
+    - distance: Tensor, the pairwise distances between instances
+    - dim: int, dimension of instances' feature vectors
+    - cutoff: float, minimum distance of sampled pairs
+    - nonzero_loss_cutoff: float, maximum distance of pairs contribute to the loss function.
+    - normalize: bool, if true normalizes weights such that their values are between 0 and 1.
+
+    Returns:
+    - inds: int Tensor, random weighted indices of shape (1, N)
+    - valid_col_mask: Boolean tensor of shape (Ny,) where Ny is the number of columns in the input distance matrix,
+                      indicates which columns contain valid elements (i.e., non-zero weights).
+    """
     n = distance.shape[0]
 
+    # create a boolean mask of size (n,n) for indicies other than the diagonal
     mask = ~torch.eye(n, dtype=torch.bool, device=distance.device)
     if 'adaptive_nonzero_loss_cutoff' in kwargs and kwargs['adaptive_nonzero_loss_cutoff']:
         far_cutoff = (distance - distance.diag()[None]) < nonzero_loss_cutoff
@@ -36,6 +77,7 @@ def _distance_weighted_sampling(distance, dim, cutoff=0.5, nonzero_loss_cutoff=1
     dclamp = distance.detach().clamp(min=cutoff)
     log_weights = ((2.0 - float(dim)) * dclamp.log() - (float(dim-3)/2)*torch.log(torch.clamp(1.0 - 0.25*(dclamp*dclamp), min=1e-8)))
 
+    # normalize the weights such that their values are between 0 and 1
     if normalize:
         # normalization includes positive pair distances.
         # so following off-diag min max may be better.
@@ -47,6 +89,7 @@ def _distance_weighted_sampling(distance, dim, cutoff=0.5, nonzero_loss_cutoff=1
     lwmax, _ = log_weights.max(dim=0, keepdim=True)
     weights = torch.exp(log_weights - lwmax)
 
+    # apply masks to set small distances to zero.
     mask = mask & far_cutoff & (weights>0)
     weights[~mask] = 0
 
@@ -65,13 +108,36 @@ def _distance_weighted_sampling(distance, dim, cutoff=0.5, nonzero_loss_cutoff=1
     return  inds, valid_col_mask
 
 
-def _get_negative_mask(dist_mat, sampling_policy='semihard', margin=1.0, **kwargs):
+def _get_negative_mask(dist_mat, sampling_policy='hard', margin=1.0, **kwargs):
     """
     Doing negative sample mining along the vertical direction (dim0) of the pairwise dist mat of x and y. 
     The mask is "1 for elements that meet the conditions of that sampling_policy, 0 otherwise".
+    
+    Args:
+    - `dist_mat`: torch.tensor; the pairwise distance matrix of shape (n, n)
+    - `sampling_policy`: str; the policy used to sample negative pairs. choices:
+                            * 'hard': default; see paper;
+                            * 'semihard';
+                            * 'semiharder';
+                            * 'semiharder+';
+                            * 'noneasy';
+                            * 'random';
+                            * 'dweighted';
+                            * 'easy'.
+    - `margin`: float; margin set for semihard* policies.
+
+    Returns:
+    - `random_idx`: torch.tensor; the indices of negative samples
+    - `valid_col_mask`: torch.ByteTensor; the mask for valid columns
+    
+    Notes:
+    - See Triplet Loss paper: https://arxiv.org/abs/1503.03832
+    - Two points are a negative pair if their distance is less than their positive pair plus a certain margin.
     """
+
+    # Detach distance matrix
     dist_mat = dist_mat.detach()
-    # The broadcast direction here determines the axis of negative sample mining.
+    # Broadcasting direction sets axis for negative sample mining
     # Transpose to the x-axis direction (dim0) for mining (axes with dim size of 1 are automatically broadcast).
     positive_dist = dist_mat.diag()[None]   # (1, n)
 
@@ -105,7 +171,6 @@ def _get_negative_mask(dist_mat, sampling_policy='semihard', margin=1.0, **kwarg
     elif sampling_policy == 'hard':
         # It is a necessary and sufficient condition for hard negative that the following is positive.
         # The bool are inverted and masked by inf (same as below).
-        # これが正なのがhard negativeの必要十分条件なので、条件満たさないものをinfでマスクする（
         mask[~(positive_dist - dist_mat > 0)] = 0
         
     elif sampling_policy == 'noneasy':
@@ -181,10 +246,18 @@ def _symmetric_bidirectional_loss(x_embedding, y_embedding, sampling_policy, mar
 
 def multimodal_triplet_loss(x_embedding, y_embedding, params):
     """
-    bi-directional triplet lossを計算する。
-    具体的には次のLy, Lxについて平均したもの。
-    Ly(x, y, y') = max(0, ||x-y|| - ||x-y'|| + m)
-    Lx(x, y, x') = max(0, ||x-y|| - ||x'-y|| + m)
+    Calculate bi-directional triplet loss average of Ly and Lx:
+        Ly(x, y, y') = max(0, ||x-y|| - ||x-y'|| + m)
+        Lx(x, y, x') = max(0, ||x-y|| - ||x'-y|| + m)
+
+    Args:
+      x_embedding: Tensor, shape [batch_size, embedding_size], feature embeddings of first modality samples.
+      y_embedding: Tensor, shape [batch_size, embedding_size], feature embeddings of second modality samples.
+      params: Namespace or dict, parameters for loss calculation (margin, sampling policy, sampling target, loss mode, improved triplet weight).
+
+    Returns:
+      loss: float tensor, the calculated triplet loss.
+
     """
     
     margin = params.margin
