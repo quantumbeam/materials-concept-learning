@@ -2,7 +2,8 @@ import sys
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-from torch_geometric.nn import PointConv, fps, radius, global_max_pool
+from torch_geometric.nn import fps, radius, global_max_pool
+from torch_geometric.nn.conv import PointNetConv
 import numpy as np
 from pymatgen.core.structure import Structure
 from models.pointnet import SAModule, GlobalSAModule
@@ -20,7 +21,7 @@ class PeriodicSAModule(torch.nn.Module):
         super(PeriodicSAModule, self).__init__()
         self.ratio = ratio
         self.r = r
-        self.conv = PointConv(nn)
+        self.conv = PointNetConv(nn)
 
     def forward(self, x, pos, fps_pos, batch, frac_pos, trans_vec, scale):
         idx = fps(fps_pos, batch, ratio=self.ratio) if self.ratio < 1 else Ellipsis
@@ -87,7 +88,7 @@ class PeriodicSAModule2(torch.nn.Module):
         super(PeriodicSAModule2, self).__init__()
         self.ratio = ratio
         self.r = r
-        self.conv = PointConv(nn)
+        self.conv = PointNetConv(nn)
 
     def forward(self, x, pos, fps_pos, batch, frac_pos, trans_vec, scale):
         idx = fps(fps_pos, batch, ratio=self.ratio) if self.ratio<1 else Ellipsis
@@ -161,7 +162,7 @@ class PeriodicSAModule3(torch.nn.Module):
         super(PeriodicSAModule3, self).__init__()
         self.ratio = ratio
         self.r = r
-        self.conv = PointConv(nn)
+        self.conv = PointNetConv(nn)
 
     def forward(self, x, pos, fps_pos, batch, frac_pos, trans_vec, scale):
         idx = fps(fps_pos, batch, ratio=self.ratio) if self.ratio<1 else Ellipsis

@@ -2,7 +2,8 @@ import sys
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-from torch_geometric.nn import PointConv, fps, radius, global_max_pool, global_mean_pool
+from torch_geometric.nn import fps, radius, global_max_pool
+from torch_geometric.nn.conv import PointNetConv
 from models.utils import MLP, normalize_scale, normalize_embedding
 
 # def get_cart_coords(data):
@@ -32,7 +33,7 @@ class SAModule(torch.nn.Module):
         super(SAModule, self).__init__()
         self.ratio = ratio
         self.r = r
-        self.conv = PointConv(nn)
+        self.conv = PointNetConv(nn)
 
     def forward(self, x, pos, batch):
         idx = fps(pos, batch, ratio=self.ratio) if self.ratio<1 else Ellipsis
